@@ -1,0 +1,89 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Personal Cinema Universe Explorer — your tuning knobs.
+#
+# This is *your* file. Editing it changes how the map thinks about your taste.
+# - Changing `role_weights` or `edges.default_threshold` triggers a re-precompute
+#   of EDGES ONLY (embeddings + cluster labels are cached and untouched).
+# - Changing `embedding.*` or `embedding.recipe` invalidates cached embeddings
+#   (they're keyed by film id + hash of the input string) and cascades downstream.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[embedding]
+# Which embedding backend. "local" = on-device sentence-transformers (no API key).
+# "hosted" is a drop-in alternative (see providers/embedding.py) — not wired by default.
+provider = "local"
+# Local model. BGE-large (1024-dim) is markedly stronger than MiniLM (384-dim) and
+# lifts every similarity feature (layout, neighbours, vibe search, twins, compare).
+# Lighter options: "BAAI/bge-base-en-v1.5" (768-dim) or "all-MiniLM-L6-v2" (384-dim).
+model = "BAAI/bge-large-en-v1.5"
+
+[embedding.recipe]
+# The embedding input string per film is built by concatenating these fields, in
+# order. This single choice drives ALL downstream similarity. Toggle fields on/off.
+use_overview = true
+use_tagline = true
+use_keywords = true
+# How many top keywords (by billing/relevance) to include.
+max_keywords = 12
+# Fold LLM-tagged abstract themes into the embedding (run `pipeline.run tag` first).
+# This is the big lever for THEME fidelity (e.g. Meet Joe Black <-> Devil's Advocate).
+use_llm_themes = false
+
+[projection]
+# "umap" (preferred — preserves thematic neighborhoods) with graceful fallback to
+# "pca" then "tsne" if umap-learn isn't installed. Force a specific one here.
+method = "umap"      # umap | pca | tsne
+umap_n_neighbors = 15
+umap_min_dist = 0.1
+random_state = 42
+
+[clustering]
+# "hdbscan" pairs naturally with umap; "kmeans" is the simpler fallback.
+method = "hdbscan"   # hdbscan | kmeans
+# HDBSCAN: smaller -> more, tighter clusters. Roughly your "phase" granularity.
+# (Clustering runs on the 2D map projection, so this maps directly to island size.)
+hdbscan_min_cluster_size = 8
+# 'leaf' = many fine, homogeneous phases (recommended); 'eom' = fewer, larger blobs.
+hdbscan_selection = "leaf"
+# KMeans fallback only: target number of clusters.
+kmeans_n_clusters = 12
+
+[labeling]
+# Cluster naming. "gemini" calls Google Gemini (needs GEMINI_API_KEY). "heuristic"
+# names clusters from their most distinctive keywords/genres — zero API keys.
+provider = "gemini"          # gemini | openai | anthropic | heuristic
+gemini_model = "gemini-2.5-flash"
+# If the chosen LLM provider has no API key, silently fall back to the heuristic.
+fallback_to_heuristic = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Creative edges.  edge_weight ~= sum over shared attributes of role_weight * rarity
+# Rarity is self-calibrating (TF-IDF style: rarer-in-YOUR-collection = stronger).
+# Crank up whatever you personally care about.
+# ─────────────────────────────────────────────────────────────────────────────
+[edges]
+default_threshold = 0.35     # which edges are drawn by default (0-1, slider overrides)
+max_edges_per_node = 12      # cap fan-out so hubs don't dominate the render
+top_actors_per_film = 8      # only the top-billed N actors count as "shared cast"
+
+[edges.role_weights]
+director = 1.0
+creator = 1.0                # TV showrunner (created_by) — director-equivalent for series
+composer = 0.9
+dp = 0.85                     # director of photography / cinematographer
+writer = 0.7
+editor = 0.5
+collection = 1.0             # same franchise/collection membership
+keyword = 0.4
+actor = 0.35
+genre = 0.15
+
+[nodes]
+# What visual properties encode. size_by: "rating" | "recency" | "none".
+size_by = "rating"
+color_by = "cluster"         # "cluster" | "decade" | "rating"
+
+[tmdb]
+language = "en-US"
+# Requests per second cap for enrichment (be polite; TMDB is generous but finite).
+rate_limit_rps = 20
